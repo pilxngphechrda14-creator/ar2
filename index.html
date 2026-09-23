@@ -1,0 +1,747 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>AR English Speaking Game</title>
+    
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Mitr:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Mitr', 'sans-serif'],
+                    },
+                    colors: {
+                        brand: {
+                            pink: '#FF9A9E',
+                            orange: '#FECFEF',
+                            yellow: '#FDFBFB',
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    
+    <!-- MediaPipe Face Mesh -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js" crossorigin="anonymous"></script>
+    
+    <!-- Canvas Confetti -->
+    <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
+
+    <style>
+        body {
+            font-family: 'Mitr', sans-serif;
+            background: linear-gradient(135deg, #FF9A9E 0%, #FECFEF 99%, #FECFEF 100%);
+            -webkit-user-select: none;
+            user-select: none;
+        }
+        
+        /* Glassmorphism utility */
+        .glass {
+            background: rgba(255, 255, 255, 0.6);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.4);
+            box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.1);
+        }
+
+        .glass-dark {
+            background: rgba(0, 0, 0, 0.6);
+            backdrop-filter: blur(8px);
+            -webkit-backdrop-filter: blur(8px);
+        }
+
+        /* Mirrored Video/Canvas */
+        .mirrored {
+            transform: scaleX(-1);
+        }
+
+        /* Vignette Effect for wrong answer */
+        .vignette-overlay {
+            position: absolute;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: radial-gradient(circle, transparent 50%, rgba(0,0,0,0.8) 150%);
+            opacity: 0;
+            transition: opacity 0.5s ease;
+            pointer-events: none;
+        }
+        .vignette-active .vignette-overlay {
+            opacity: 1;
+        }
+
+        /* Meter Bar Transition */
+        .meter-fill {
+            transition: width 0.5s ease-out, background-color 0.3s ease;
+        }
+
+        /* Pulse Animation for recording */
+        @keyframes pulse-ring {
+            0% { transform: scale(0.8); box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7); }
+            70% { transform: scale(1); box-shadow: 0 0 0 15px rgba(239, 68, 68, 0); }
+            100% { transform: scale(0.8); box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
+        }
+        .recording-pulse {
+            animation: pulse-ring 1.5s infinite;
+        }
+        
+        .hide { display: none !important; }
+    </style>
+</head>
+<body class="h-screen w-screen overflow-hidden text-gray-800">
+
+    <!-- App Container -->
+    <div id="appContainer" class="w-full h-full flex flex-col md:flex-row relative">
+        
+        <!-- Left Side: UI & Gameplay -->
+        <div class="w-full md:w-1/2 h-1/2 md:h-full p-4 md:p-8 flex flex-col justify-center items-center z-10">
+            
+            <!-- Start Screen -->
+            <div id="startScreen" class="glass rounded-3xl p-8 w-full max-w-md text-center flex flex-col gap-6 transform transition-all">
+                <div class="text-6xl">🎮</div>
+                <div>
+                    <h1 class="text-3xl font-bold text-pink-600 mb-2">Speak & Play AR</h1>
+                    <p class="text-gray-600 text-sm">เกมฝึกพูดภาษาอังกฤษด้วยระบบ AI และ AR</p>
+                </div>
+                <div class="bg-yellow-50 text-yellow-700 text-xs p-3 rounded-xl text-left">
+                    <b>คำแนะนำ:</b> ระบบต้องการเข้าถึงไมโครโฟนเพื่อตรวจจับเสียงพูด และกล้องเพื่อแสดงเอฟเฟกต์บนใบหน้า
+                </div>
+                <button id="btnStart" class="bg-gradient-to-r from-pink-400 to-rose-400 hover:from-pink-500 hover:to-rose-500 text-white font-bold py-4 px-8 rounded-full shadow-lg transform transition active:scale-95 text-lg">
+                    เริ่มเกมเลย!
+                </button>
+            </div>
+
+            <!-- Game Screen -->
+            <div id="gameScreen" class="glass rounded-3xl p-6 w-full max-w-md flex flex-col hide relative">
+                <!-- Header -->
+                <div class="flex justify-between items-center mb-6">
+                    <div class="bg-white/70 px-4 py-1 rounded-full font-semibold text-pink-500" id="progressText">ข้อ 1/10</div>
+                    <div class="bg-white/70 px-4 py-1 rounded-full font-bold text-indigo-500">คะแนน: <span id="scoreText">0</span></div>
+                </div>
+
+                <!-- Word Display -->
+                <div class="flex-1 flex flex-col items-center justify-center text-center my-8 min-h-[150px]">
+                    <h2 id="englishWord" class="text-5xl md:text-6xl font-bold text-gray-800 mb-2 tracking-wide drop-shadow-sm">Word</h2>
+                    <p id="thaiWord" class="text-xl text-gray-500">คำแปล</p>
+                </div>
+
+                <!-- Status Badge -->
+                <div class="flex justify-center mb-4 min-h-[40px]">
+                    <div id="statusBadge" class="bg-blue-100 text-blue-700 px-6 py-2 rounded-full font-bold text-lg shadow-sm transition-all duration-300 opacity-0 transform translate-y-4">
+                        เตรียมตัว...
+                    </div>
+                </div>
+
+                <!-- Accuracy Meter -->
+                <div class="w-full mt-auto">
+                    <div class="flex justify-between text-xs font-semibold text-gray-500 mb-1">
+                        <span>ความแม่นยำ</span>
+                        <span id="meterText">0%</span>
+                    </div>
+                    <div class="h-6 w-full bg-gray-200 rounded-full overflow-hidden shadow-inner">
+                        <div id="meterFill" class="h-full bg-gray-400 meter-fill w-0 relative">
+                            <div class="absolute inset-0 bg-white/20"></div>
+                        </div>
+                    </div>
+                    <!-- Result Message -->
+                    <div id="resultMessage" class="text-center mt-3 font-bold text-lg h-6"></div>
+                </div>
+            </div>
+
+            <!-- End Screen -->
+            <div id="endScreen" class="glass rounded-3xl p-8 w-full max-w-md text-center flex flex-col gap-6 hide transform scale-95 opacity-0 transition-all duration-500">
+                <h2 id="endTitle" class="text-4xl font-bold text-pink-600">ยินดีด้วย!</h2>
+                <div class="text-7xl my-4" id="endEmoji">🏆</div>
+                <div class="text-xl text-gray-600">คุณได้คะแนน</div>
+                <div class="text-6xl font-black text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-pink-600" id="finalScore">8/10</div>
+                <p id="endSubtitle" class="text-gray-500 mt-2">เก่งมากๆ เลยนะ!</p>
+                <button id="btnRestart" class="mt-4 bg-gray-800 hover:bg-gray-700 text-white font-bold py-4 px-8 rounded-full shadow-lg transform transition active:scale-95 text-lg">
+                    เล่นใหม่อีกครั้ง
+                </button>
+            </div>
+
+        </div>
+
+        <!-- Right Side: Camera Viewport -->
+        <div id="cameraContainer" class="w-full md:w-1/2 h-1/2 md:h-full relative overflow-hidden bg-gray-900 shadow-2xl rounded-t-[3rem] md:rounded-l-[3rem] md:rounded-tr-none z-0">
+            
+            <!-- Loading Camera Overlay -->
+            <div id="cameraLoading" class="absolute inset-0 flex flex-col items-center justify-center text-white z-20 glass-dark">
+                <svg class="animate-spin h-10 w-10 text-white mb-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                <p class="font-semibold tracking-wider">กำลังเปิดกล้อง...</p>
+            </div>
+
+            <!-- Video Element (Hidden but used by MediaPipe) -->
+            <video id="webcam" class="hidden" autoplay playsinline></video>
+            
+            <!-- Render Canvas -->
+            <canvas id="outputCanvas" class="w-full h-full object-cover mirrored absolute inset-0 z-10"></canvas>
+            
+            <!-- Vignette Overlay -->
+            <div class="vignette-overlay z-10"></div>
+        </div>
+        
+        <!-- Error Overlay -->
+        <div id="errorOverlay" class="absolute inset-0 glass-dark z-50 flex items-center justify-center hide">
+            <div class="bg-white p-8 rounded-3xl max-w-sm text-center shadow-2xl">
+                <div class="text-5xl mb-4">⚠️</div>
+                <h3 class="text-xl font-bold text-red-500 mb-2" id="errorTitle">ข้อผิดพลาด</h3>
+                <p class="text-gray-600 mb-6" id="errorMessage">ไม่สามารถเข้าถึงอุปกรณ์ได้</p>
+                <button onclick="location.reload()" class="bg-gray-800 text-white px-6 py-2 rounded-full font-semibold">โหลดหน้าใหม่</button>
+            </div>
+        </div>
+
+    </div>
+
+    <script>
+        // --- 1. Game Data & State ---
+        const vocabulary = [
+            { en: "Apple", th: "แอปเปิ้ล" },
+            { en: "Banana", th: "กล้วย" },
+            { en: "Orange", th: "ส้ม" },
+            { en: "Elephant", th: "ช้าง" },
+            { en: "Dolphin", th: "โลมา" },
+            { en: "Butterfly", th: "ผีเสื้อ" },
+            { en: "Teacher", th: "คุณครู" },
+            { en: "Student", th: "นักเรียน" },
+            { en: "Beautiful", th: "สวยงาม" },
+            { en: "Wonderful", th: "ยอดเยี่ยม" }
+        ];
+
+        let state = {
+            currentQuestionIndex: 0,
+            score: 0,
+            isPlaying: false,
+            arEffect: null, // 'crown', 'horns', null
+            faceLandmarks: null,
+            recognitionActive: false
+        };
+
+        // DOM Elements
+        const DOM = {
+            startScreen: document.getElementById('startScreen'),
+            gameScreen: document.getElementById('gameScreen'),
+            endScreen: document.getElementById('endScreen'),
+            btnStart: document.getElementById('btnStart'),
+            btnRestart: document.getElementById('btnRestart'),
+            progressText: document.getElementById('progressText'),
+            scoreText: document.getElementById('scoreText'),
+            englishWord: document.getElementById('englishWord'),
+            thaiWord: document.getElementById('thaiWord'),
+            statusBadge: document.getElementById('statusBadge'),
+            meterFill: document.getElementById('meterFill'),
+            meterText: document.getElementById('meterText'),
+            resultMessage: document.getElementById('resultMessage'),
+            cameraContainer: document.getElementById('cameraContainer'),
+            cameraLoading: document.getElementById('cameraLoading'),
+            video: document.getElementById('webcam'),
+            canvas: document.getElementById('outputCanvas'),
+            errorOverlay: document.getElementById('errorOverlay'),
+            errorTitle: document.getElementById('errorTitle'),
+            errorMessage: document.getElementById('errorMessage')
+        };
+
+        const ctx = DOM.canvas.getContext('2d');
+
+        // --- 2. Audio Synthesizer (Web Audio API) ---
+        let audioCtx;
+
+        function initAudio() {
+            if (!audioCtx) {
+                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            }
+            if (audioCtx.state === 'suspended') {
+                audioCtx.resume();
+            }
+        }
+
+        const Sound = {
+            playTone: (freq, type, duration, vol=0.1) => {
+                if(!audioCtx) return;
+                const osc = audioCtx.createOscillator();
+                const gain = audioCtx.createGain();
+                osc.type = type;
+                osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+                
+                // Envelope
+                gain.gain.setValueAtTime(0, audioCtx.currentTime);
+                gain.gain.linearRampToValueAtTime(vol, audioCtx.currentTime + 0.05);
+                gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + duration);
+
+                osc.connect(gain);
+                gain.connect(audioCtx.destination);
+                osc.start();
+                osc.stop(audioCtx.currentTime + duration);
+            },
+            click: () => Sound.playTone(600, 'sine', 0.1, 0.2),
+            tick: () => Sound.playTone(880, 'sine', 0.1, 0.1),
+            go: () => Sound.playTone(1320, 'square', 0.3, 0.15),
+            correct: () => {
+                Sound.playTone(523.25, 'sine', 0.2, 0.2); // C5
+                setTimeout(() => Sound.playTone(659.25, 'sine', 0.4, 0.2), 100); // E5
+                setTimeout(() => Sound.playTone(783.99, 'sine', 0.6, 0.2), 200); // G5
+            },
+            wrong: () => {
+                Sound.playTone(150, 'sawtooth', 0.4, 0.2);
+                setTimeout(() => Sound.playTone(130, 'sawtooth', 0.6, 0.2), 200);
+            },
+            warning: () => {
+                Sound.playTone(400, 'square', 0.2, 0.1);
+                setTimeout(() => Sound.playTone(400, 'square', 0.3, 0.1), 150);
+            },
+            fanfare: () => {
+                const notes = [523.25, 659.25, 783.99, 1046.50];
+                notes.forEach((freq, i) => {
+                    setTimeout(() => Sound.playTone(freq, 'square', 0.3, 0.2), i * 150);
+                });
+                setTimeout(() => Sound.playTone(1046.50, 'square', 0.8, 0.2), 600);
+            },
+            gameOver: () => {
+                Sound.playTone(300, 'sawtooth', 0.5, 0.2);
+                setTimeout(() => Sound.playTone(250, 'sawtooth', 0.5, 0.2), 400);
+                setTimeout(() => Sound.playTone(200, 'sawtooth', 1.0, 0.2), 800);
+            }
+        };
+
+        // --- 3. Speech Recognition (Web Speech API) ---
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        let recognition = null;
+
+        if (SpeechRecognition) {
+            recognition = new SpeechRecognition();
+            recognition.lang = 'en-US';
+            recognition.interimResults = false;
+            recognition.maxAlternatives = 1;
+        } else {
+            showError("Browser ไม่รองรับ", "เบราว์เซอร์ของคุณไม่รองรับ Web Speech API แนะนำให้ใช้ Google Chrome");
+        }
+
+        function listenForSpeech(timeoutMs = 5000) {
+            return new Promise((resolve) => {
+                if (!recognition) return resolve("");
+                
+                let isResolved = false;
+                
+                const finalize = (text) => {
+                    if (isResolved) return;
+                    isResolved = true;
+                    state.recognitionActive = false;
+                    try { recognition.stop(); } catch(e){}
+                    resolve(text);
+                };
+
+                recognition.onresult = (event) => {
+                    const transcript = event.results[0][0].transcript;
+                    finalize(transcript);
+                };
+
+                recognition.onerror = (event) => {
+                    console.log("Speech Error:", event.error);
+                    finalize(""); // Treat error (like no-speech) as empty
+                };
+
+                recognition.onend = () => {
+                    if (!isResolved) finalize("");
+                };
+
+                try {
+                    state.recognitionActive = true;
+                    recognition.start();
+                    // Set timeout
+                    setTimeout(() => {
+                        finalize(""); // Force resolve if timeout
+                    }, timeoutMs);
+                } catch (e) {
+                    console.error("Failed to start recognition", e);
+                    finalize("");
+                }
+            });
+        }
+
+        // Levenshtein distance for fuzzy matching
+        function getSimilarity(s1, s2) {
+            s1 = s1.toLowerCase().replace(/[^a-z0-9]/g, '');
+            s2 = s2.toLowerCase().replace(/[^a-z0-9]/g, '');
+            if (s1 === s2) return 100;
+            if (s1.length === 0 || s2.length === 0) return 0;
+            
+            let costs = new Array();
+            for (let i = 0; i <= s1.length; i++) {
+                let lastValue = i;
+                for (let j = 0; j <= s2.length; j++) {
+                    if (i == 0) costs[j] = j;
+                    else {
+                        if (j > 0) {
+                            let newValue = costs[j - 1];
+                            if (s1.charAt(i - 1) != s2.charAt(j - 1))
+                                newValue = Math.min(Math.min(newValue, lastValue), costs[j]) + 1;
+                            costs[j - 1] = lastValue;
+                            lastValue = newValue;
+                        }
+                    }
+                }
+                if (i > 0) costs[s2.length] = lastValue;
+            }
+            let steps = costs[s2.length];
+            let maxLen = Math.max(s1.length, s2.length);
+            return Math.round(((maxLen - steps) / maxLen) * 100);
+        }
+
+        // --- 4. AR and MediaPipe ---
+        const faceMesh = new FaceMesh({locateFile: (file) => {
+            return `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`;
+        }});
+        
+        faceMesh.setOptions({
+            maxNumFaces: 1,
+            refineLandmarks: true,
+            minDetectionConfidence: 0.5,
+            minTrackingConfidence: 0.5
+        });
+
+        faceMesh.onResults((results) => {
+            // Draw video to canvas
+            ctx.save();
+            ctx.clearRect(0, 0, DOM.canvas.width, DOM.canvas.height);
+            
+            // Draw Video Frame (Mirrored)
+            ctx.translate(DOM.canvas.width, 0);
+            ctx.scale(-1, 1);
+            ctx.drawImage(results.image, 0, 0, DOM.canvas.width, DOM.canvas.height);
+
+            // Save landmarks for rendering AR overlay
+            if (results.multiFaceLandmarks && results.multiFaceLandmarks.length > 0) {
+                state.faceLandmarks = results.multiFaceLandmarks[0];
+                drawAREffect(state.faceLandmarks);
+            } else {
+                state.faceLandmarks = null;
+            }
+            
+            ctx.restore();
+            
+            // Hide camera loading screen once first frame is rendered
+            if(!DOM.cameraLoading.classList.contains('hide')) {
+                DOM.cameraLoading.classList.add('hide');
+            }
+        });
+
+        // Setup Camera
+        async function startCamera() {
+            try {
+                // Request explicit permission first to handle errors cleanly
+                await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' }, audio: true });
+                
+                const camera = new Camera(DOM.video, {
+                    onFrame: async () => {
+                        // Ensure canvas dimensions match video
+                        if (DOM.canvas.width !== DOM.video.videoWidth) {
+                            DOM.canvas.width = DOM.video.videoWidth;
+                            DOM.canvas.height = DOM.video.videoHeight;
+                        }
+                        await faceMesh.send({image: DOM.video});
+                    },
+                    width: 640,
+                    height: 480
+                });
+                await camera.start();
+            } catch (err) {
+                console.error(err);
+                showError("กล้องและไมค์ถูกบล็อก", "โปรดอนุญาตให้เว็บไซต์เข้าถึงกล้องและไมโครโฟนของคุณเพื่อเล่นเกม");
+            }
+        }
+
+        // Draw AR Effects manually using Canvas 2D
+        function drawAREffect(landmarks) {
+            if (!state.arEffect) return;
+            
+            const w = DOM.canvas.width;
+            const h = DOM.canvas.height;
+
+            if (state.arEffect === 'crown') {
+                // Forehead landmark ~ 10. Sides ~ 234, 454
+                const center = landmarks[10];
+                const left = landmarks[234];
+                const right = landmarks[454];
+                
+                // Calculate face width to scale the crown
+                const dx = (right.x - left.x) * w;
+                const dy = (right.y - left.y) * h;
+                const faceWidth = Math.sqrt(dx*dx + dy*dy);
+                const crownWidth = faceWidth * 0.8;
+                const crownHeight = crownWidth * 0.6;
+                
+                const cx = center.x * w;
+                const cy = (center.y * h) - (crownHeight * 0.5); // move up
+
+                drawCrown(cx, cy, crownWidth, crownHeight);
+
+            } else if (state.arEffect === 'horns') {
+                // Left forehead ~103, Right forehead ~332
+                const leftPoint = landmarks[103];
+                const rightPoint = landmarks[332];
+                const center = landmarks[10];
+                const leftFace = landmarks[234];
+                const rightFace = landmarks[454];
+
+                const faceWidth = Math.abs((rightFace.x - leftFace.x) * w);
+                const hornSize = faceWidth * 0.3;
+
+                drawHorn(leftPoint.x * w, leftPoint.y * h, hornSize, -1); // Left horn points leftish
+                drawHorn(rightPoint.x * w, rightPoint.y * h, hornSize, 1);  // Right horn points rightish
+            }
+        }
+
+        function drawCrown(cx, cy, width, height) {
+            ctx.save();
+            ctx.translate(cx, cy);
+            ctx.fillStyle = '#FFD700'; // Gold
+            ctx.strokeStyle = '#B8860B';
+            ctx.lineWidth = 2;
+            ctx.lineJoin = 'round';
+
+            const w2 = width / 2;
+            ctx.beginPath();
+            ctx.moveTo(-w2, height/2); // bottom left
+            ctx.lineTo(w2, height/2);  // bottom right
+            ctx.lineTo(w2 + (width*0.1), -height/2); // top right peak
+            ctx.lineTo(w2/2, 0); // inner valley right
+            ctx.lineTo(0, -height); // center peak
+            ctx.lineTo(-w2/2, 0); // inner valley left
+            ctx.lineTo(-w2 - (width*0.1), -height/2); // top left peak
+            ctx.closePath();
+            
+            ctx.fill();
+            ctx.stroke();
+            
+            // Jewels
+            ctx.fillStyle = '#FF0000'; // Red
+            ctx.beginPath(); ctx.arc(0, -height/2, width*0.08, 0, Math.PI*2); ctx.fill();
+            ctx.fillStyle = '#0000FF'; // Blue
+            ctx.beginPath(); ctx.arc(-w2/2, height*0.1, width*0.05, 0, Math.PI*2); ctx.fill();
+            ctx.beginPath(); ctx.arc(w2/2, height*0.1, width*0.05, 0, Math.PI*2); ctx.fill();
+
+            ctx.restore();
+        }
+
+        function drawHorn(x, y, size, directionX) {
+            ctx.save();
+            ctx.translate(x, y);
+            // Tilt horn based on direction
+            ctx.rotate((Math.PI / 6) * directionX); 
+            
+            // Base shadow
+            const grad = ctx.createLinearGradient(0, 0, 0, -size);
+            grad.addColorStop(0, '#8B0000');
+            grad.addColorStop(1, '#FF0000');
+
+            ctx.fillStyle = grad;
+            ctx.beginPath();
+            ctx.moveTo(-size/4, 0); // Base left
+            ctx.quadraticCurveTo(-size/8, -size*0.8, size/2 * directionX, -size); // Curve to tip
+            ctx.quadraticCurveTo(size/4, -size*0.4, size/4, 0); // Curve to base right
+            ctx.closePath();
+            ctx.fill();
+
+            ctx.restore();
+        }
+
+        // --- 5. Game Logic & Flow ---
+        
+        // Delay helper
+        const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+        function setStatus(text, colorClass, isPulsing = false) {
+            DOM.statusBadge.textContent = text;
+            DOM.statusBadge.className = `px-6 py-2 rounded-full font-bold text-lg shadow-sm transition-all duration-300 transform translate-y-0 opacity-100 ${colorClass}`;
+            if (isPulsing) DOM.statusBadge.classList.add('recording-pulse');
+        }
+
+        function hideStatus() {
+            DOM.statusBadge.classList.remove('translate-y-0', 'opacity-100');
+            DOM.statusBadge.classList.add('translate-y-4', 'opacity-0');
+            DOM.statusBadge.classList.remove('recording-pulse');
+        }
+
+        function updateMeter(percent, colorClass) {
+            DOM.meterFill.style.width = `${percent}%`;
+            DOM.meterFill.className = `h-full meter-fill relative ${colorClass}`;
+            DOM.meterText.textContent = `${percent}%`;
+        }
+
+        async function runQuestion() {
+            const wordData = vocabulary[state.currentQuestionIndex];
+            
+            // Setup UI
+            DOM.englishWord.textContent = wordData.en;
+            DOM.thaiWord.textContent = wordData.th;
+            DOM.progressText.textContent = `ข้อ ${state.currentQuestionIndex + 1}/${vocabulary.length}`;
+            DOM.scoreText.textContent = state.score;
+            updateMeter(0, 'bg-gray-400');
+            DOM.resultMessage.textContent = "";
+            state.arEffect = null;
+            DOM.cameraContainer.classList.remove('vignette-active');
+
+            // 1. Countdown
+            for (let i = 3; i > 0; i--) {
+                setStatus(`เตรียมตัว... ${i}`, 'bg-yellow-100 text-yellow-700');
+                Sound.tick();
+                await sleep(1000);
+            }
+
+            // 2. Listen
+            setStatus('🎙️ พูดเลย!', 'bg-red-500 text-white', true);
+            Sound.go();
+            
+            // Wait for speech (max 5s)
+            const spokenText = await listenForSpeech(5000);
+            
+            hideStatus();
+            
+            // 3. Evaluate
+            if (!spokenText || spokenText.trim() === "") {
+                // No speech detected
+                Sound.warning();
+                updateMeter(0, 'bg-yellow-400');
+                DOM.resultMessage.textContent = "ไม่ได้ยินเสียง ลองอีกครั้งนะ";
+                DOM.resultMessage.className = "text-center mt-3 font-bold text-lg h-6 text-yellow-600";
+                
+                await sleep(2500);
+                // Loop same question
+                return runQuestion();
+            }
+
+            // Calculate similarity
+            const sim = getSimilarity(wordData.en, spokenText);
+            
+            if (sim >= 80) {
+                // Pass
+                state.score++;
+                state.arEffect = 'crown';
+                Sound.correct();
+                updateMeter(sim, 'bg-green-500');
+                DOM.resultMessage.textContent = `เยี่ยมมาก! (${spokenText})`;
+                DOM.resultMessage.className = "text-center mt-3 font-bold text-lg h-6 text-green-600";
+                confetti({ particleCount: 100, spread: 70, origin: { y: 0.6 } });
+            } else {
+                // Fail
+                state.arEffect = 'horns';
+                DOM.cameraContainer.classList.add('vignette-active');
+                Sound.wrong();
+                updateMeter(sim, 'bg-red-500');
+                DOM.resultMessage.textContent = `เกือบแล้ว! (ได้ยินว่า: ${spokenText})`;
+                DOM.resultMessage.className = "text-center mt-3 font-bold text-lg h-6 text-red-600";
+            }
+
+            DOM.scoreText.textContent = state.score;
+
+            // Wait showing result
+            await sleep(3000);
+
+            // Next question or End
+            state.currentQuestionIndex++;
+            if (state.currentQuestionIndex < vocabulary.length) {
+                runQuestion();
+            } else {
+                showEndScreen();
+            }
+        }
+
+        function showEndScreen() {
+            DOM.gameScreen.classList.add('hide');
+            DOM.endScreen.classList.remove('hide');
+            
+            // Small delay to allow display:block to apply before animating opacity
+            setTimeout(() => {
+                DOM.endScreen.classList.remove('scale-95', 'opacity-0');
+            }, 50);
+
+            DOM.finalScore.textContent = `${state.score}/${vocabulary.length}`;
+            state.arEffect = null;
+            DOM.cameraContainer.classList.remove('vignette-active');
+
+            if (state.score >= 8) {
+                DOM.endTitle.textContent = "ยอดเยี่ยมมาก!";
+                DOM.endEmoji.textContent = "🏆";
+                DOM.endSubtitle.textContent = "ภาษาอังกฤษของคุณเป๊ะสุดๆ";
+                Sound.fanfare();
+                // Continuous confetti
+                const duration = 3 * 1000;
+                const end = Date.now() + duration;
+                (function frame() {
+                    confetti({ particleCount: 5, angle: 60, spread: 55, origin: { x: 0 }, colors: ['#FF9A9E', '#FECFEF'] });
+                    confetti({ particleCount: 5, angle: 120, spread: 55, origin: { x: 1 }, colors: ['#FF9A9E', '#FECFEF'] });
+                    if (Date.now() < end) requestAnimationFrame(frame);
+                }());
+            } else if (state.score >= 5) {
+                DOM.endTitle.textContent = "เก่งมาก!";
+                DOM.endEmoji.textContent = "👍";
+                DOM.endSubtitle.textContent = "ฝึกอีกนิดจะเก่งกว่านี้แน่นอน";
+                Sound.correct();
+            } else {
+                DOM.endTitle.textContent = "พยายามเข้านะ!";
+                DOM.endEmoji.textContent = "💪";
+                DOM.endSubtitle.textContent = "มาเริ่มฝึกกันใหม่ดีกว่า";
+                Sound.gameOver();
+            }
+        }
+
+        // --- 6. Event Listeners ---
+        DOM.btnStart.addEventListener('click', async () => {
+            Sound.click();
+            initAudio();
+            
+            // Transition UI
+            DOM.startScreen.classList.add('opacity-0', 'scale-95');
+            setTimeout(() => {
+                DOM.startScreen.classList.add('hide');
+                DOM.gameScreen.classList.remove('hide');
+            }, 300);
+
+            // Start Camera & MediaPipe
+            await startCamera();
+            
+            // Randomize vocabulary order
+            vocabulary.sort(() => Math.random() - 0.5);
+            
+            state.currentQuestionIndex = 0;
+            state.score = 0;
+            
+            // Add a small delay before first question to let camera load fully
+            setTimeout(() => {
+                runQuestion();
+            }, 2000);
+        });
+
+        DOM.btnRestart.addEventListener('click', () => {
+            Sound.click();
+            DOM.endScreen.classList.add('hide', 'scale-95', 'opacity-0');
+            DOM.gameScreen.classList.remove('hide');
+            
+            vocabulary.sort(() => Math.random() - 0.5);
+            state.currentQuestionIndex = 0;
+            state.score = 0;
+            
+            runQuestion();
+        });
+
+        function showError(title, message) {
+            DOM.errorTitle.textContent = title;
+            DOM.errorMessage.textContent = message;
+            DOM.errorOverlay.classList.remove('hide');
+        }
+
+    </script>
+</body>
+</html>
